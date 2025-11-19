@@ -3,24 +3,105 @@
   const USER_RATINGS_KEY = "promptLibrary.userRatings.v1";
   const NOTES_KEY = "promptLibrary.notes.v1";
 
+  // Security utilities
+  function sanitizeHTML(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function validateString(input, maxLength = 1000) {
+    if (typeof input !== "string") {
+      throw new Error("Input must be a string");
+    }
+    if (input.length > maxLength) {
+      throw new Error(
+        `Input exceeds maximum length of ${maxLength} characters`
+      );
+    }
+    return input.trim();
+  }
+
+  function validateFileSize(file, maxSizeMB = 10) {
+    const maxBytes = maxSizeMB * 1024 * 1024;
+    if (file.size > maxBytes) {
+      throw new Error(`File size exceeds ${maxSizeMB}MB limit`);
+    }
+  }
+
+  // Performance utilities
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func.apply(this, args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  function throttle(func, limit) {
+    let lastRun = 0;
+    return function executedFunction(...args) {
+      if (Date.now() - lastRun >= limit) {
+        func.apply(this, args);
+        lastRun = Date.now();
+      }
+    };
+  }
+
+  // Simple encryption utilities (base64 encoding for basic obfuscation)
+  function encryptData(data) {
+    try {
+      const jsonString = JSON.stringify(data);
+      return btoa(unescape(encodeURIComponent(jsonString)));
+    } catch (error) {
+      console.warn("Encryption failed, storing as plain text:", error);
+      return JSON.stringify(data);
+    }
+  }
+
+  function decryptData(encryptedData, fallback) {
+    try {
+      // Try to decrypt (base64 decode)
+      const decoded = decodeURIComponent(escape(atob(encryptedData)));
+      return JSON.parse(decoded);
+    } catch (error) {
+      // Fallback to plain JSON parse for backward compatibility
+      try {
+        return JSON.parse(encryptedData);
+      } catch (parseError) {
+        console.warn("Decryption and parse failed:", error, parseError);
+        return fallback;
+      }
+    }
+  }
+
+  // Cache for rendered elements
+  const renderCache = new Map();
+  let currentRenderKey = null;
+
   // Metadata tracking functions
   function trackModel(modelName, content) {
-    // Validation
-    if (!modelName || typeof modelName !== "string") {
+    // Enhanced validation
+    const sanitizedModel = validateString(modelName, 100);
+    const sanitizedContent = validateString(content, 50000); // 50KB content limit
+
+    if (!sanitizedModel) {
       throw new Error("Model name must be a non-empty string");
     }
-    if (modelName.length > 100) {
-      throw new Error("Model name must be 100 characters or less");
-    }
-    if (typeof content !== "string") {
-      throw new Error("Content must be a string");
+
+    if (!sanitizedContent) {
+      throw new Error("Content cannot be empty");
     }
 
     const now = new Date().toISOString();
-    const tokenEstimate = estimateTokens(content, false);
+    const tokenEstimate = estimateTokens(sanitizedContent, false);
 
     return {
-      model: modelName.trim(),
+      model: sanitizedModel,
       createdAt: now,
       updatedAt: now,
       tokenEstimate: tokenEstimate,
@@ -368,32 +449,67 @@
   function showMergeConflictDialog(duplicates, onResolve) {
     const dialog = document.createElement("div");
     dialog.className = "merge-dialog-overlay";
-    dialog.innerHTML = `
-      <div class="merge-dialog">
-        <h3>Import Conflicts Detected</h3>
-        <p>Found ${duplicates.length} prompt(s) with IDs that already exist:</p>
-        <ul class="conflict-list">
-          ${duplicates
-            .map((p) => `<li><strong>${p.title}</strong> (ID: ${p.id})</li>`)
-            .join("")}
-        </ul>
-        <p>How would you like to handle these conflicts?</p>
-        <div class="merge-actions">
-          <button class="btn btn-primary" data-action="replace">
-            Replace Existing
-          </button>
-          <button class="btn btn-secondary" data-action="skip">
-            Skip Duplicates
-          </button>
-          <button class="btn btn-secondary" data-action="rename">
-            Rename Imports
-          </button>
-          <button class="btn btn-danger" data-action="cancel">
-            Cancel Import
-          </button>
-        </div>
-      </div>
-    `;
+
+    const dialogContent = document.createElement("div");
+    dialogContent.className = "merge-dialog";
+
+    const title = document.createElement("h3");
+    title.textContent = "Import Conflicts Detected";
+
+    const description = document.createElement("p");
+    description.textContent = `Found ${duplicates.length} prompt(s) with IDs that already exist:`;
+
+    const conflictList = document.createElement("ul");
+    conflictList.className = "conflict-list";
+
+    duplicates.forEach((p) => {
+      const li = document.createElement("li");
+      const strong = document.createElement("strong");
+      strong.textContent = validateString(p.title, 120);
+      li.appendChild(strong);
+      li.appendChild(document.createTextNode(` (ID: ${sanitizeHTML(p.id)})`));
+      conflictList.appendChild(li);
+    });
+
+    const question = document.createElement("p");
+    question.textContent = "How would you like to handle these conflicts?";
+
+    const actions = document.createElement("div");
+    actions.className = "merge-actions";
+
+    const buttons = [
+      {
+        text: "Replace Existing",
+        action: "replace",
+        className: "btn btn-primary",
+      },
+      {
+        text: "Skip Duplicates",
+        action: "skip",
+        className: "btn btn-secondary",
+      },
+      {
+        text: "Rename Imports",
+        action: "rename",
+        className: "btn btn-secondary",
+      },
+      { text: "Cancel Import", action: "cancel", className: "btn btn-danger" },
+    ];
+
+    buttons.forEach((btnConfig) => {
+      const btn = document.createElement("button");
+      btn.className = btnConfig.className;
+      btn.textContent = btnConfig.text;
+      btn.dataset.action = btnConfig.action;
+      actions.appendChild(btn);
+    });
+
+    dialogContent.appendChild(title);
+    dialogContent.appendChild(description);
+    dialogContent.appendChild(conflictList);
+    dialogContent.appendChild(question);
+    dialogContent.appendChild(actions);
+    dialog.appendChild(dialogContent);
 
     document.body.appendChild(dialog);
 
@@ -494,77 +610,100 @@
   }
 
   function importData(file) {
-    const backup = createBackup();
+    try {
+      // Validate file
+      validateFileSize(file, 10); // 10MB limit
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const importData = JSON.parse(e.target.result);
-        const validatedData = validateImportData(importData);
-
-        const existingPrompts = getPrompts();
-        const duplicates = findDuplicatePrompts(
-          validatedData.data.prompts,
-          existingPrompts
-        );
-
-        const processAndComplete = (conflictResolution) => {
-          try {
-            const { finalPrompts, finalRatings, finalNotes } =
-              processImportData(validatedData, conflictResolution);
-
-            // Save all data
-            setPrompts(finalPrompts);
-            saveUserRatings(finalRatings);
-            saveNotes(finalNotes);
-
-            // Update in-memory data
-            userRatings = finalRatings;
-            promptNotes = finalNotes;
-
-            // Re-render
-            renderPrompts();
-
-            const imported = validatedData.data.prompts.length;
-            const skipped =
-              conflictResolution === "skip" ? duplicates.length : 0;
-            showNotification(
-              `Successfully imported ${imported - skipped} prompts` +
-                (skipped > 0 ? ` (${skipped} skipped due to conflicts)` : ""),
-              "success"
-            );
-          } catch (error) {
-            console.error("Import processing failed:", error);
-            restoreBackup(backup);
-            showNotification(
-              `Import failed during processing: ${error.message}`,
-              "error"
-            );
-          }
-        };
-
-        if (duplicates.length > 0) {
-          showMergeConflictDialog(duplicates, (action) => {
-            if (action === "cancel") {
-              showNotification("Import cancelled", "info");
-              return;
-            }
-            processAndComplete(action);
-          });
-        } else {
-          processAndComplete("none");
-        }
-      } catch (error) {
-        console.error("Import failed:", error);
-        showNotification(`Import failed: ${error.message}`, "error");
+      if (
+        !file.type.includes("json") &&
+        !file.name.toLowerCase().endsWith(".json")
+      ) {
+        throw new Error("Only JSON files are allowed");
       }
-    };
 
-    reader.onerror = () => {
-      showNotification("Failed to read file", "error");
-    };
+      const backup = createBackup();
 
-    reader.readAsText(file);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const jsonString = e.target.result;
+
+          // Validate JSON string size
+          if (jsonString.length > 50 * 1024 * 1024) {
+            // 50MB text limit
+            throw new Error("JSON content too large");
+          }
+
+          const importData = JSON.parse(jsonString);
+          const validatedData = validateImportData(importData);
+
+          const existingPrompts = getPrompts();
+          const duplicates = findDuplicatePrompts(
+            validatedData.data.prompts,
+            existingPrompts
+          );
+
+          const processAndComplete = (conflictResolution) => {
+            try {
+              const { finalPrompts, finalRatings, finalNotes } =
+                processImportData(validatedData, conflictResolution);
+
+              // Save all data
+              setPrompts(finalPrompts);
+              saveUserRatings(finalRatings);
+              saveNotes(finalNotes);
+
+              // Update in-memory data
+              userRatings = finalRatings;
+              promptNotes = finalNotes;
+
+              // Re-render
+              renderPrompts();
+
+              const imported = validatedData.data.prompts.length;
+              const skipped =
+                conflictResolution === "skip" ? duplicates.length : 0;
+              showNotification(
+                `Successfully imported ${imported - skipped} prompts` +
+                  (skipped > 0 ? ` (${skipped} skipped due to conflicts)` : ""),
+                "success"
+              );
+            } catch (error) {
+              console.error("Import processing failed:", error);
+              restoreBackup(backup);
+              showNotification(
+                `Import failed during processing: ${error.message}`,
+                "error"
+              );
+            }
+          };
+
+          if (duplicates.length > 0) {
+            showMergeConflictDialog(duplicates, (action) => {
+              if (action === "cancel") {
+                showNotification("Import cancelled", "info");
+                return;
+              }
+              processAndComplete(action);
+            });
+          } else {
+            processAndComplete("none");
+          }
+        } catch (error) {
+          console.error("Import failed:", error);
+          showNotification(`Import failed: ${error.message}`, "error");
+        }
+      };
+
+      reader.onerror = () => {
+        showNotification("Failed to read file", "error");
+      };
+
+      reader.readAsText(file);
+    } catch (error) {
+      console.error("File validation failed:", error);
+      showNotification(`Import failed: ${error.message}`, "error");
+    }
   }
 
   function showNotification(message, type = "info") {
@@ -575,11 +714,19 @@
     }
 
     const notification = document.createElement("div");
-    notification.className = `notification notification-${type}`;
-    notification.innerHTML = `
-      <span class="notification-message">${message}</span>
-      <button class="notification-close" aria-label="Close notification">×</button>
-    `;
+    notification.className = `notification notification-${sanitizeHTML(type)}`;
+
+    const messageSpan = document.createElement("span");
+    messageSpan.className = "notification-message";
+    messageSpan.textContent = validateString(message, 500);
+
+    const closeButton = document.createElement("button");
+    closeButton.className = "notification-close";
+    closeButton.setAttribute("aria-label", "Close notification");
+    closeButton.textContent = "×";
+
+    notification.appendChild(messageSpan);
+    notification.appendChild(closeButton);
 
     document.body.appendChild(notification);
 
@@ -600,52 +747,181 @@
 
   function safeParse(json, fallback) {
     try {
-      return JSON.parse(json);
-    } catch {
+      const parsed = JSON.parse(json);
+      return validateDataIntegrity(parsed, fallback);
+    } catch (error) {
+      console.warn("JSON parse error, using fallback:", error);
       return fallback;
     }
   }
 
+  function validateDataIntegrity(data, fallback) {
+    // Basic structure validation
+    if (data === null || data === undefined) {
+      return fallback;
+    }
+
+    // Array validation
+    if (Array.isArray(fallback)) {
+      if (!Array.isArray(data)) {
+        console.warn("Expected array, got:", typeof data);
+        return fallback;
+      }
+
+      // Validate array items if it's a prompts array
+      if (fallback.length === 0 && data.length > 0 && data[0].id) {
+        return data.filter((item) => {
+          return (
+            item &&
+            typeof item.id === "string" &&
+            typeof item.title === "string" &&
+            typeof item.content === "string" &&
+            item.title.length <= 120 &&
+            item.content.length <= 50000
+          );
+        });
+      }
+    }
+
+    // Object validation
+    if (typeof fallback === "object" && !Array.isArray(fallback)) {
+      if (typeof data !== "object" || Array.isArray(data)) {
+        console.warn("Expected object, got:", typeof data);
+        return fallback;
+      }
+
+      // Validate object values
+      const validated = {};
+      for (const [key, value] of Object.entries(data)) {
+        if (typeof key === "string" && key.length <= 50) {
+          if (typeof value === "number" && value >= 0 && value <= 5) {
+            // Rating validation
+            validated[key] = value;
+          } else if (
+            typeof value === "object" &&
+            value.content &&
+            value.lastModified
+          ) {
+            // Notes validation
+            if (
+              typeof value.content === "string" &&
+              value.content.length <= 500
+            ) {
+              validated[key] = {
+                content: value.content,
+                lastModified: value.lastModified,
+                characterCount: value.content.length,
+              };
+            }
+          }
+        }
+      }
+      return validated;
+    }
+
+    return data;
+  }
+
   function getPrompts() {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const arr = safeParse(raw, []);
-    if (!Array.isArray(arr)) return [];
-    return arr;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return [];
+
+      const arr = decryptData(raw, []);
+      const validated = validateDataIntegrity(arr, []);
+      if (!Array.isArray(validated)) {
+        console.warn("Prompts data is not an array, resetting to empty array");
+        return [];
+      }
+      return validated;
+    } catch (error) {
+      console.error("Error loading prompts:", error);
+      return [];
+    }
   }
 
   function setPrompts(arr) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+    try {
+      if (!Array.isArray(arr)) {
+        throw new Error("Prompts must be an array");
+      }
+
+      // Validate array size
+      if (arr.length > 2000) {
+        throw new Error("Too many prompts to store");
+      }
+
+      const encryptedData = encryptData(arr);
+
+      // Check localStorage quota
+      if (encryptedData.length > 5 * 1024 * 1024) {
+        // 5MB limit
+        throw new Error("Data too large to store");
+      }
+
+      localStorage.setItem(STORAGE_KEY, encryptedData);
+    } catch (error) {
+      console.error("Error saving prompts:", error);
+      showNotification("Failed to save prompts: " + error.message, "error");
+      throw error;
+    }
   }
 
   function loadUserRatings() {
     try {
       const raw = localStorage.getItem(USER_RATINGS_KEY);
-      const obj = safeParse(raw, {});
-      return obj && typeof obj === "object" ? obj : {};
-    } catch {
+      if (!raw) return {};
+
+      const obj = decryptData(raw, {});
+      const validated = validateDataIntegrity(obj, {});
+      return validated && typeof validated === "object" ? validated : {};
+    } catch (error) {
+      console.warn("Error loading ratings:", error);
       return {};
     }
   }
 
   function saveUserRatings(map) {
-    localStorage.setItem(USER_RATINGS_KEY, JSON.stringify(map || {}));
+    try {
+      const encryptedData = encryptData(map || {});
+      localStorage.setItem(USER_RATINGS_KEY, encryptedData);
+    } catch (error) {
+      console.error("Failed to save ratings:", error);
+      showNotification("Failed to save ratings: " + error.message, "error");
+    }
   }
 
   function loadNotes() {
     try {
       const raw = localStorage.getItem(NOTES_KEY);
-      const obj = safeParse(raw, {});
-      return obj && typeof obj === "object" ? obj : {};
-    } catch {
+      if (!raw) return {};
+
+      const obj = decryptData(raw, {});
+      const validated = validateDataIntegrity(obj, {});
+      return validated && typeof validated === "object" ? validated : {};
+    } catch (error) {
+      console.warn("Error loading notes:", error);
       return {};
     }
   }
 
   function saveNotes(notes) {
     try {
-      localStorage.setItem(NOTES_KEY, JSON.stringify(notes || {}));
-    } catch (e) {
-      console.error("Failed to save notes:", e);
+      if (typeof notes !== "object" || notes === null) {
+        throw new Error("Notes must be a valid object");
+      }
+
+      const encryptedData = encryptData(notes);
+
+      if (encryptedData.length > 1024 * 1024) {
+        // 1MB limit for notes
+        throw new Error("Notes data too large");
+      }
+
+      localStorage.setItem(NOTES_KEY, encryptedData);
+    } catch (error) {
+      console.error("Failed to save notes:", error);
+      showNotification("Failed to save notes: " + error.message, "error");
     }
   }
 
@@ -655,16 +931,24 @@
   }
 
   function setNotes(promptId, content) {
-    if (!content || content.trim() === "") {
-      delete promptNotes[promptId];
-    } else {
-      promptNotes[promptId] = {
-        content: content.trim(),
-        lastModified: Date.now(),
-        characterCount: content.trim().length,
-      };
+    try {
+      const sanitizedId = validateString(promptId, 50);
+      const sanitizedContent = validateString(content, 500);
+
+      if (!sanitizedContent || sanitizedContent === "") {
+        delete promptNotes[sanitizedId];
+      } else {
+        promptNotes[sanitizedId] = {
+          content: sanitizedContent,
+          lastModified: Date.now(),
+          characterCount: sanitizedContent.length,
+        };
+      }
+      saveNotes(promptNotes);
+    } catch (error) {
+      console.error("Error setting notes:", error);
+      throw error;
     }
-    saveNotes(promptNotes);
   }
 
   function getUserRating(id) {
@@ -756,161 +1040,314 @@
   function renderPrompts() {
     const prompts = getFilteredSortedPrompts();
 
+    // Generate cache key based on current state
+    const renderKey = JSON.stringify({
+      prompts: prompts.map((p) => ({
+        id: p.id,
+        title: p.title,
+        updatedAt: p.metadata?.updatedAt,
+      })),
+      filter: getCurrentFilterMin(),
+      sort: getCurrentSort(),
+      ratings: Object.keys(userRatings).length,
+      notes: Object.keys(promptNotes).length,
+    });
+
+    // Return cached result if nothing changed
+    if (currentRenderKey === renderKey && renderCache.has(renderKey)) {
+      return;
+    }
+
+    currentRenderKey = renderKey;
+
     if (countEl) {
       countEl.textContent = prompts.length
         ? `${prompts.length} saved`
         : "No prompts yet";
     }
 
-    cardsEl.innerHTML = "";
+    // Use document fragment for better performance
+    const fragment = document.createDocumentFragment();
 
     if (!prompts.length) {
       const empty = document.createElement("div");
       empty.className = "muted";
       empty.style.padding = "6px 2px 10px";
       empty.textContent = "No prompts saved yet. Create one above.";
-      cardsEl.appendChild(empty);
-      return;
-    }
+      fragment.appendChild(empty);
+    } else {
+      // Limit rendering for performance (virtual scrolling preparation)
+      const maxRender = Math.min(prompts.length, 100);
 
-    for (const p of prompts) {
-      const card = document.createElement("article");
-      card.className = "card";
-      card.dataset.id = p.id;
-
-      const h3 = document.createElement("h3");
-      h3.className = "card-title";
-      h3.textContent = p.title;
-
-      const prev = document.createElement("p");
-      prev.className = "card-preview";
-      prev.textContent = createPreview(p.content);
-
-      // Metadata display
-      const metadataEl = document.createElement("div");
-      metadataEl.className = "card-metadata";
-
-      if (p.metadata) {
-        const modelEl = document.createElement("div");
-        modelEl.className = "metadata-model";
-        modelEl.innerHTML = `<span class="metadata-label">Model:</span> ${p.metadata.model}`;
-
-        const timestampEl = document.createElement("div");
-        timestampEl.className = "metadata-timestamp";
-        timestampEl.innerHTML = `<span class="metadata-label">Created:</span> ${formatTimestamp(
-          p.metadata.createdAt
-        )}`;
-
-        const tokensEl = document.createElement("div");
-        tokensEl.className = "metadata-tokens";
-        const { min, max, confidence } = p.metadata.tokenEstimate;
-        tokensEl.innerHTML = `<span class="metadata-label">Tokens:</span> <span class="token-estimate token-confidence-${confidence}">${min}-${max} (${confidence})</span>`;
-
-        metadataEl.appendChild(modelEl);
-        metadataEl.appendChild(timestampEl);
-        metadataEl.appendChild(tokensEl);
-      } else {
-        // Fallback for prompts without metadata
-        const fallbackEl = document.createElement("div");
-        fallbackEl.className = "metadata-fallback";
-        fallbackEl.textContent = "Legacy prompt (no metadata)";
-        metadataEl.appendChild(fallbackEl);
+      for (let i = 0; i < maxRender; i++) {
+        const p = prompts[i];
+        const card = createPromptCard(p);
+        fragment.appendChild(card);
       }
 
-      const ratingWrap = document.createElement("div");
-      renderRatingComponent(ratingWrap, p);
-
-      const actions = document.createElement("div");
-      actions.className = "card-actions";
-
-      const notesBtn = document.createElement("button");
-      notesBtn.type = "button";
-      notesBtn.className = "btn btn-notes";
-      notesBtn.setAttribute("aria-label", `Toggle notes for ${p.title}`);
-      notesBtn.dataset.action = "toggle-notes";
-      notesBtn.dataset.id = p.id;
-
-      const hasNotes = getNotes(p.id);
-      notesBtn.innerHTML = hasNotes ? "📝" : "📄";
-      notesBtn.setAttribute("aria-expanded", "false");
-
-      const del = document.createElement("button");
-      del.type = "button";
-      del.className = "btn btn-danger";
-      del.setAttribute("aria-label", `Delete ${p.title}`);
-      del.textContent = "Delete";
-      del.dataset.action = "delete";
-      del.dataset.id = p.id;
-
-      actions.appendChild(notesBtn);
-      actions.appendChild(del);
-
-      // Notes section (initially hidden)
-      const notesSection = document.createElement("div");
-      notesSection.className = "notes-section";
-      notesSection.dataset.id = p.id;
-      notesSection.setAttribute("aria-hidden", "true");
-
-      const notesTextarea = document.createElement("textarea");
-      notesTextarea.className = "notes-textarea";
-      notesTextarea.placeholder = "Add your notes about this prompt...";
-      notesTextarea.maxLength = 500;
-      notesTextarea.rows = 3;
-      const currentNotes = getNotes(p.id);
-      if (currentNotes) {
-        notesTextarea.value = currentNotes.content;
+      // Show load more button if there are more items
+      if (prompts.length > maxRender) {
+        const loadMore = document.createElement("div");
+        loadMore.className = "load-more-container";
+        const button = document.createElement("button");
+        button.className = "btn btn-secondary";
+        button.textContent = `Load ${Math.min(
+          50,
+          prompts.length - maxRender
+        )} more prompts`;
+        button.onclick = () => renderMorePrompts(maxRender);
+        loadMore.appendChild(button);
+        fragment.appendChild(loadMore);
       }
-
-      const notesControls = document.createElement("div");
-      notesControls.className = "notes-controls";
-
-      const charCount = document.createElement("span");
-      charCount.className = "char-count";
-      charCount.textContent = `${notesTextarea.value.length}/500`;
-
-      const saveBtn = document.createElement("button");
-      saveBtn.type = "button";
-      saveBtn.className = "btn btn-primary notes-save";
-      saveBtn.textContent = "Save";
-      saveBtn.disabled = true;
-      saveBtn.dataset.action = "save-notes";
-      saveBtn.dataset.id = p.id;
-
-      const deleteNotesBtn = document.createElement("button");
-      deleteNotesBtn.type = "button";
-      deleteNotesBtn.className = "btn btn-danger notes-delete";
-      deleteNotesBtn.textContent = "Delete Notes";
-      deleteNotesBtn.style.display = currentNotes ? "block" : "none";
-      deleteNotesBtn.dataset.action = "delete-notes";
-      deleteNotesBtn.dataset.id = p.id;
-
-      notesControls.appendChild(charCount);
-      notesControls.appendChild(saveBtn);
-      notesControls.appendChild(deleteNotesBtn);
-
-      notesSection.appendChild(notesTextarea);
-      notesSection.appendChild(notesControls);
-
-      card.appendChild(h3);
-      card.appendChild(prev);
-      card.appendChild(metadataEl);
-      card.appendChild(ratingWrap);
-      card.appendChild(actions);
-      card.appendChild(notesSection);
-
-      cardsEl.appendChild(card);
     }
+
+    // Clear and append all at once
+    cardsEl.innerHTML = "";
+    cardsEl.appendChild(fragment);
+
+    // Cache the result
+    renderCache.set(renderKey, true);
+
+    // Clean old cache entries
+    if (renderCache.size > 10) {
+      const firstKey = renderCache.keys().next().value;
+      renderCache.delete(firstKey);
+    }
+  }
+
+  function renderMorePrompts(startIndex) {
+    const prompts = getFilteredSortedPrompts();
+    const endIndex = Math.min(startIndex + 50, prompts.length);
+
+    const fragment = document.createDocumentFragment();
+
+    for (let i = startIndex; i < endIndex; i++) {
+      const p = prompts[i];
+      const card = createPromptCard(p);
+      fragment.appendChild(card);
+    }
+
+    // Remove load more button
+    const loadMoreContainer = cardsEl.querySelector(".load-more-container");
+    if (loadMoreContainer) {
+      loadMoreContainer.remove();
+    }
+
+    cardsEl.appendChild(fragment);
+
+    // Add new load more button if needed
+    if (endIndex < prompts.length) {
+      const loadMore = document.createElement("div");
+      loadMore.className = "load-more-container";
+      const button = document.createElement("button");
+      button.className = "btn btn-secondary";
+      button.textContent = `Load ${Math.min(
+        50,
+        prompts.length - endIndex
+      )} more prompts`;
+      button.onclick = () => renderMorePrompts(endIndex);
+      loadMore.appendChild(button);
+      cardsEl.appendChild(loadMore);
+    }
+  }
+
+  function createPromptCard(p) {
+    const card = document.createElement("article");
+    card.className = "card";
+    card.dataset.id = p.id;
+
+    const h3 = document.createElement("h3");
+    h3.className = "card-title";
+    h3.textContent = validateString(p.title, 120);
+
+    const prev = document.createElement("p");
+    prev.className = "card-preview";
+    prev.textContent = createPreview(p.content);
+
+    // Metadata display
+    const metadataEl = createMetadataElement(p);
+    const ratingWrap = document.createElement("div");
+    renderRatingComponent(ratingWrap, p);
+    const actions = createActionsElement(p);
+    const notesSection = createNotesSection(p);
+
+    card.appendChild(h3);
+    card.appendChild(prev);
+    card.appendChild(metadataEl);
+    card.appendChild(ratingWrap);
+    card.appendChild(actions);
+    card.appendChild(notesSection);
+
+    return card;
+  }
+
+  function createMetadataElement(p) {
+    const metadataEl = document.createElement("div");
+    metadataEl.className = "card-metadata";
+
+    if (p.metadata) {
+      const modelEl = document.createElement("div");
+      modelEl.className = "metadata-model";
+
+      const modelLabel = document.createElement("span");
+      modelLabel.className = "metadata-label";
+      modelLabel.textContent = "Model:";
+
+      modelEl.appendChild(modelLabel);
+      modelEl.appendChild(
+        document.createTextNode(" " + sanitizeHTML(p.metadata.model))
+      );
+
+      const timestampEl = document.createElement("div");
+      timestampEl.className = "metadata-timestamp";
+
+      const timestampLabel = document.createElement("span");
+      timestampLabel.className = "metadata-label";
+      timestampLabel.textContent = "Created:";
+
+      timestampEl.appendChild(timestampLabel);
+      timestampEl.appendChild(
+        document.createTextNode(" " + formatTimestamp(p.metadata.createdAt))
+      );
+
+      const tokensEl = document.createElement("div");
+      tokensEl.className = "metadata-tokens";
+      const { min, max, confidence } = p.metadata.tokenEstimate;
+
+      const tokensLabel = document.createElement("span");
+      tokensLabel.className = "metadata-label";
+      tokensLabel.textContent = "Tokens:";
+
+      const tokenEstimate = document.createElement("span");
+      tokenEstimate.className = `token-estimate token-confidence-${confidence}`;
+      tokenEstimate.textContent = `${min}-${max} (${confidence})`;
+
+      tokensEl.appendChild(tokensLabel);
+      tokensEl.appendChild(document.createTextNode(" "));
+      tokensEl.appendChild(tokenEstimate);
+
+      metadataEl.appendChild(modelEl);
+      metadataEl.appendChild(timestampEl);
+      metadataEl.appendChild(tokensEl);
+    } else {
+      const fallbackEl = document.createElement("div");
+      fallbackEl.className = "metadata-fallback";
+      fallbackEl.textContent = "Legacy prompt (no metadata)";
+      metadataEl.appendChild(fallbackEl);
+    }
+
+    return metadataEl;
+  }
+
+  function createActionsElement(p) {
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+
+    const notesBtn = document.createElement("button");
+    notesBtn.type = "button";
+    notesBtn.className = "btn btn-notes";
+    notesBtn.setAttribute(
+      "aria-label",
+      `Toggle notes for ${validateString(p.title, 120)}`
+    );
+    notesBtn.dataset.action = "toggle-notes";
+    notesBtn.dataset.id = p.id;
+
+    const hasNotes = getNotes(p.id);
+    notesBtn.textContent = hasNotes ? "📝" : "📄";
+    notesBtn.setAttribute("aria-expanded", "false");
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn btn-danger";
+    del.setAttribute("aria-label", `Delete ${validateString(p.title, 120)}`);
+    del.textContent = "Delete";
+    del.dataset.action = "delete";
+    del.dataset.id = p.id;
+
+    actions.appendChild(notesBtn);
+    actions.appendChild(del);
+
+    return actions;
+  }
+
+  function createNotesSection(p) {
+    const notesSection = document.createElement("div");
+    notesSection.className = "notes-section";
+    notesSection.dataset.id = p.id;
+    notesSection.setAttribute("aria-hidden", "true");
+
+    const notesTextarea = document.createElement("textarea");
+    notesTextarea.className = "notes-textarea";
+    notesTextarea.placeholder = "Add your notes about this prompt...";
+    notesTextarea.maxLength = 500;
+    notesTextarea.rows = 3;
+    const currentNotes = getNotes(p.id);
+    if (currentNotes) {
+      notesTextarea.value = currentNotes.content;
+    }
+
+    const notesControls = document.createElement("div");
+    notesControls.className = "notes-controls";
+
+    const charCount = document.createElement("span");
+    charCount.className = "char-count";
+    charCount.textContent = `${notesTextarea.value.length}/500`;
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn btn-primary notes-save";
+    saveBtn.textContent = "Save";
+    saveBtn.disabled = true;
+    saveBtn.dataset.action = "save-notes";
+    saveBtn.dataset.id = p.id;
+
+    const deleteNotesBtn = document.createElement("button");
+    deleteNotesBtn.type = "button";
+    deleteNotesBtn.className = "btn btn-danger notes-delete";
+    deleteNotesBtn.textContent = "Delete Notes";
+    deleteNotesBtn.style.display = currentNotes ? "block" : "none";
+    deleteNotesBtn.dataset.action = "delete-notes";
+    deleteNotesBtn.dataset.id = p.id;
+
+    notesControls.appendChild(charCount);
+    notesControls.appendChild(saveBtn);
+    notesControls.appendChild(deleteNotesBtn);
+
+    notesSection.appendChild(notesTextarea);
+    notesSection.appendChild(notesControls);
+
+    return notesSection;
   }
 
   function addPrompt(title, content, modelName = "Default Model") {
     try {
+      // Validate and sanitize inputs
+      const sanitizedTitle = validateString(title, 120);
+      const sanitizedContent = validateString(content, 50000);
+      const sanitizedModel = validateString(modelName, 100);
+
+      if (!sanitizedTitle) {
+        throw new Error("Title cannot be empty");
+      }
+
+      if (!sanitizedContent) {
+        throw new Error("Content cannot be empty");
+      }
+
       const prompts = getPrompts();
-      const metadata = trackModel(modelName, content);
+
+      // Limit total number of prompts
+      if (prompts.length >= 1000) {
+        throw new Error("Maximum number of prompts (1000) reached");
+      }
+
+      const metadata = trackModel(sanitizedModel, sanitizedContent);
 
       prompts.unshift({
         id: makeId(),
-        title,
-        content,
+        title: sanitizedTitle,
+        content: sanitizedContent,
         createdAt: Date.now(),
         metadata: metadata,
       });
@@ -928,26 +1365,42 @@
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    const title = (titleInput.value || "").trim();
-    const content = (contentInput.value || "").trim();
-    const modelInput = document.getElementById("model");
-    const model = modelInput
-      ? (modelInput.value || "").trim()
-      : "Default Model";
-
-    if (!title || !content) {
-      // Basic hint: mark invalid fields
-      if (!title) titleInput.focus();
-      return;
-    }
 
     try {
+      const title = (titleInput.value || "").trim();
+      const content = (contentInput.value || "").trim();
+      const modelInput = document.getElementById("model");
+      const model = modelInput
+        ? (modelInput.value || "").trim()
+        : "Default Model";
+
+      // Client-side validation with user feedback
+      if (!title) {
+        titleInput.focus();
+        titleInput.setCustomValidity("Title is required");
+        titleInput.reportValidity();
+        return;
+      }
+
+      if (!content) {
+        contentInput.focus();
+        contentInput.setCustomValidity("Content is required");
+        contentInput.reportValidity();
+        return;
+      }
+
+      // Clear any previous validation messages
+      titleInput.setCustomValidity("");
+      contentInput.setCustomValidity("");
+
       addPrompt(title, content, model || "Default Model");
       form.reset();
       titleInput.focus();
       renderPrompts();
+      showNotification("Prompt saved successfully", "success");
     } catch (error) {
-      alert("Error saving prompt: " + error.message);
+      console.error("Form submission error:", error);
+      showNotification(`Error saving prompt: ${error.message}`, "error");
     }
   });
 
@@ -1062,11 +1515,14 @@
     }
   }
 
+  // Debounced render function for filter/sort changes
+  const debouncedRender = debounce(renderPrompts, 150);
+
   if (ratingFilterEl) {
-    ratingFilterEl.addEventListener("change", renderPrompts);
+    ratingFilterEl.addEventListener("change", debouncedRender);
   }
   if (sortByEl) {
-    sortByEl.addEventListener("change", renderPrompts);
+    sortByEl.addEventListener("change", debouncedRender);
   }
 
   // Export/Import Event Listeners
@@ -1153,6 +1609,23 @@
   }
 
   document.addEventListener("DOMContentLoaded", renderPrompts);
+
+  // Global error handler
+  window.addEventListener("error", (event) => {
+    console.error("Global error caught:", event.error);
+    showNotification(
+      "An unexpected error occurred. Please refresh the page.",
+      "error"
+    );
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("Unhandled promise rejection:", event.reason);
+    showNotification(
+      "An error occurred while processing your request.",
+      "error"
+    );
+  });
 
   // Initial paint (in case DOMContentLoaded already fired)
   renderPrompts();

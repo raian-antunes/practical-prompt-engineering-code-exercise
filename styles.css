@@ -647,3 +647,15 @@ textarea:focus {
     max-width: none;
   }
 }
+
+/* Load more functionality */
+.load-more-container {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+}
+
+.load-more-container .btn {
+  min-width: 200px;
+}
