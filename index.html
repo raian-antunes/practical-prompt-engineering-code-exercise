@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prompt Library</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container">
+        <h1>Prompt Library</h1>
+        <p class="subtitle">Save, preview, and manage your prompts locally</p>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="panel" aria-labelledby="create-heading">
+        <h2 id="create-heading">Create Prompt</h2>
+        <form id="promptForm" novalidate>
+          <div class="field">
+            <label for="title">Title</label>
+            <input
+              id="title"
+              name="title"
+              type="text"
+              maxlength="120"
+              required
+              placeholder="e.g. Summarize Research Paper"
+            />
+          </div>
+          <div class="field">
+            <label for="model">AI Model</label>
+            <input
+              id="model"
+              name="model"
+              type="text"
+              maxlength="100"
+              placeholder="e.g. GPT-4, Claude Sonnet, Gemini Pro"
+            />
+          </div>
+          <div class="field">
+            <label for="content">Content</label>
+            <textarea
+              id="content"
+              name="content"
+              rows="6"
+              required
+              placeholder="Write your prompt content here..."
+            ></textarea>
+          </div>
+          <div class="actions">
+            <button type="submit" class="btn btn-primary">Save Prompt</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="library-heading">
+        <div class="panel-header">
+          <h2 id="library-heading">Saved Prompts</h2>
+          <div class="muted" id="count"></div>
+        </div>
+        <div class="toolbar" aria-label="Prompt tools">
+          <div class="toolbar-group">
+            <label for="ratingFilter" class="toolbar-label">Filter</label>
+            <select
+              id="ratingFilter"
+              class="toolbar-select"
+              aria-label="Filter by minimum rating"
+            >
+              <option value="0">All ratings</option>
+              <option value="1">1+ stars</option>
+              <option value="2">2+ stars</option>
+              <option value="3">3+ stars</option>
+              <option value="4">4+ stars</option>
+              <option value="5">5 stars only</option>
+            </select>
+          </div>
+          <div class="toolbar-group">
+            <label for="sortBy" class="toolbar-label">Sort</label>
+            <select
+              id="sortBy"
+              class="toolbar-select"
+              aria-label="Sort prompts"
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="title-asc">Title A–Z</option>
+              <option value="title-desc">Title Z–A</option>
+              <option value="rating-desc">Highest rated</option>
+              <option value="rating-asc">Lowest rated</option>
+              <option value="model-asc">Model A-Z</option>
+              <option value="model-desc">Model Z-A</option>
+              <option value="tokens-asc">Fewest tokens</option>
+              <option value="tokens-desc">Most tokens</option>
+            </select>
+          </div>
+          <div class="toolbar-group">
+            <button
+              id="exportBtn"
+              class="btn btn-secondary"
+              aria-label="Export all prompts"
+            >
+              📤 Export
+            </button>
+            <button
+              id="importBtn"
+              class="btn btn-secondary"
+              aria-label="Import prompts"
+            >
+              📥 Import
+            </button>
+            <input
+              type="file"
+              id="importFile"
+              accept=".json"
+              style="display: none"
+              aria-label="Select import file"
+            />
+          </div>
+        </div>
+        <div id="cards" class="cards-grid" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container muted">Data is stored locally in your browser.</div>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
